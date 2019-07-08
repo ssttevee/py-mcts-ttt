@@ -4,6 +4,23 @@ from itertools import count
 from datetime import datetime, timedelta
 
 
+all_win_conds = [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8],
+    [0, 4, 8],
+    [6, 4, 2],
+]
+
+
+win_cond_map = {
+    i: list(filter(lambda cond: i in cond, all_win_conds)) for i in range(9)
+}
+
+
 class Game:
     def __init__(self, board=None, turn='x'):
         self.__board = board or ['']*9
@@ -16,36 +33,31 @@ class Game:
         return ''.join(map(lambda x: x or '_', self.__board))
 
     def valid_moves(self):
-        return list(map(lambda i: self.__cell(i), filter(lambda i: not self.__board[i], range(9))))
+        return map(lambda i: self.__cell(i), filter(lambda i: not self.__board[i], range(9)))
 
     def clone(self):
         return Game(self.__board.copy(), self.__turn)
 
-    def is_tie(self):
-        return not self.is_win('x') and not self.is_win('o')
+    def __check_index_win(self, index, player):
+        return self.__check_win(win_cond_map[index], player)
 
-    def is_win(self, player):
-        return (player == self.__cell(0) == self.__cell(1) == self.__cell(2)) \
-            or (player == self.__cell(3) == self.__cell(4) == self.__cell(5)) \
-            or (player == self.__cell(6) == self.__cell(7) == self.__cell(8)) \
-            or (player == self.__cell(0) == self.__cell(3) == self.__cell(6)) \
-            or (player == self.__cell(1) == self.__cell(4) == self.__cell(7)) \
-            or (player == self.__cell(2) == self.__cell(5) == self.__cell(8)) \
-            or (player == self.__cell(0) == self.__cell(4) == self.__cell(8)) \
-            or (player == self.__cell(6) == self.__cell(4) == self.__cell(2))
+    def __check_win(self, conds, player):
+        return any(map(lambda cond: all(map(lambda i: self.__board[i] == player, cond)), conds))
 
-    def is_over(self):
-        return all(self.__board) \
-            or self.is_win('x') \
-            or self.is_win('o')
+    def is_no_more_moves(self):
+        return all(self.__board)
 
     def move(self, cell):
-        cell = int(cell)
-        if not (1 <= cell <= 9) or self.__board[cell-1]:
-            raise Exception('bad cell')
+        index = int(cell) - 1
+        if not (0 <= index <= 8) or self.__board[index]:
+            raise Exception('bad move')
 
-        self.__board[cell-1] = self.__turn
-        self.__turn = 'x' if self.__turn == 'o' else 'o'
+        self.__board[index] = self.__turn
+
+        try:
+            return self.__check_index_win(index, self.__turn)
+        finally:
+            self.__turn = 'x' if self.__turn == 'o' else 'o'
 
     def __cell(self, index):
         return self.__board[index] or str(1 + index)
@@ -94,7 +106,8 @@ class MonteCarlo:
         their_moves = []
 
         # play game
-        while not game.is_over():
+        i_won = None
+        while not game.is_no_more_moves():
             current_state = game.state()
             if current_state not in self.__memory:
                 self.__memory[current_state] = {
@@ -104,17 +117,20 @@ class MonteCarlo:
             move = self.__pick_move(current_state)
 
             # take note of who made what move
-            if game.current_turn() == me:
+            is_me = game.current_turn() == me
+            if is_me:
                 my_moves.append((current_state, move))
             else:
                 their_moves.append((current_state, move))
 
-            game.move(move)
+            if game.move(move):
+                i_won = True if is_me else False
+                break
 
         # determine score
-        if game.is_tie():
+        if i_won is None:
             scores = (0, 0)
-        elif game.is_win(me):
+        elif i_won:
             scores = (1, -1)
         else:
             scores = (-1, 1)
@@ -135,11 +151,11 @@ class MonteCarlo:
             )
 
     def think(self, game, time_limit):
-        start_time = datetime.now()
+        end_time = datetime.now() + time_limit
         while True:
             self.__simulate(game.clone())
 
-            if datetime.now() - start_time > time_limit:
+            if datetime.now() > end_time:
                 break
 
 
@@ -150,45 +166,54 @@ def clear():
 def play_a_new_game():
     clear()
 
+    done = False
+    win = None
     bot = MonteCarlo()
     g = Game()
-    while not g.is_over():
-        g.print()
-        try:
-            g.move(input('What\'s your move? [' + ','.join(g.valid_moves()) + ']: '))
-            clear()
-
-            if g.is_over():
-                break
-
+    for i in count():
+        if i % 2:
             print('thinking...')
 
             bot.think(g, timedelta(milliseconds=100))
-            clear()
+            if g.move(bot.next_move(g.state())):
+                win = False
 
-            g.move(bot.next_move(g.state()))
-            continue
-        except ValueError:
-            clear()
-            print('Invalid input')
-        except KeyboardInterrupt:
-            print()
-            return
-        except Exception as e:
-            if str(e) == 'bad cell':
-                clear()
-                print('Invalid move')
+        else:
+            while not done:
+                g.print()
+                try:
+                    if g.move(input('What\'s your move? [' + ','.join(g.valid_moves()) + ']: ')):
+                        win = True
+
+                    done = True
+                except ValueError:
+                    clear()
+                    print('Invalid input')
+                except KeyboardInterrupt:
+                    print()
+                    return
+                except Exception as e:
+                    if str(e) == 'bad move':
+                        clear()
+                        print('Invalid move')
+                    else:
+                        raise e
             else:
-                raise e
+                done = False
+
+        clear()
+
+        if win is not None or g.is_no_more_moves():
+            break
 
     g.print()
 
-    if g.is_win('x'):
-        print('You win!')
-    elif g.is_win('o'):
-        print('You lose!')
-    else:
+    if win is None:
         print('It\'s a tie!')
+    elif win:
+        print('You win!')
+    else:
+        print('You lose!')
 
 
 def cpu_vs_cpu(thinking_time, clear_fn=clear):
