@@ -191,5 +191,85 @@ def play_a_new_game():
         print('It\'s a tie!')
 
 
+def cpu_vs_cpu(thinking_time, clear_fn=clear):
+    players = (MonteCarlo(), MonteCarlo())
+
+    g = Game()
+    for i in count():
+        clear_fn()
+
+        g.print()
+
+        print('Player %d is thinking...' % (i % 2 + 1,))
+
+        players[i % 2].think(g, thinking_time)
+        g.move(players[i % 2].next_move(g.state()))
+
+        if g.is_over():
+            break
+
+    clear_fn()
+    g.print()
+
+    if g.is_win('x'):
+        print('Player 1 wins!')
+        return (1, 0, 0)
+    elif g.is_win('o'):
+        print('Player 2 wins!')
+        return (0, 1, 0)
+    else:
+        print('It\'s a tie!')
+        return (0, 0, 1)
+
+
+def cpu_showdown(thinking_time, max_games=None):
+    scoreboard = (0, 0, 0)
+    milliseconds = thinking_time / timedelta(milliseconds=1)
+
+    def clear_and_print_scoreboard():
+        nonlocal scoreboard
+        clear()
+        print('Time: %dms\tPlayer 1: %d\tPlayer 2: %d\tDraws: %d' % (milliseconds, *scoreboard))
+
+    it = count() if max_games is None else range(max_games)
+    for _ in it:
+        result = cpu_vs_cpu(thinking_time, clear_and_print_scoreboard)
+        scoreboard = (
+            scoreboard[0] + result[0],
+            scoreboard[1] + result[1],
+            scoreboard[2] + result[2],
+        )
+
+    return scoreboard
+
+
 if __name__ == '__main__':
-    play_a_new_game()
+    start = 0
+    try:
+        with open('results.csv', 'r') as r:
+            for start, _ in enumerate(r):
+                pass
+
+    except FileNotFoundError:
+        with open('results.csv', 'w') as w:
+            w.write('thinking time (ms),total time (ms),games played,player 1 wins,player 2 wins,draws\n')
+
+    try:
+        for i in count(start):
+            start_time = datetime.now()
+            results = cpu_showdown(timedelta(milliseconds=i), 1000)
+            elapsed_time = datetime.now() - start_time
+
+            clear()
+
+            total = sum(results)
+            print('Player 1 wins: %d (%f%%)' %
+                  (results[0], results[0]/total*100))
+            print('Player 2 wins: %d (%f%%)' %
+                  (results[1], results[1]/total*100))
+            print('Draws: %d (%f%%)' % (results[2], results[2]/total*100))
+
+            with open('results.csv', 'a') as w:
+                w.write('%d,%d,%d,%d,%d,%d\n' % (i, elapsed_time/timedelta(milliseconds=1), total, *results))
+    except KeyboardInterrupt:
+        pass
